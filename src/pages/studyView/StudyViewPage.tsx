@@ -27,6 +27,7 @@ import IFrameLoader from '../../shared/components/iframeLoader/IFrameLoader';
 import { StudySummaryTab } from 'pages/studyView/tabs/SummaryTab';
 import StudyPageHeader from './studyPageHeader/StudyPageHeader';
 import CNSegments from './tabs/CNSegments';
+import ExternalLinksTab from './tabs/ExternalLinksTab';
 import { getInternalClient } from 'shared/api/cbioportalInternalClientInstance';
 import AddChartButton from './addChartButton/AddChartButton';
 import { sleep } from '../../shared/lib/TimeUtils';
@@ -765,6 +766,18 @@ export default class StudyViewPage extends React.Component<
                                             store={this.store}
                                             urlWrapper={this.urlWrapper}
                                         />
+                                    </MSKTab>
+
+                                    <MSKTab
+                                        key={6}
+                                        id={
+                                            StudyViewPageTabKeyEnum.EXTERNAL_LINKS
+                                        }
+                                        linkText={
+                                            StudyViewPageTabDescriptions.EXTERNAL_LINKS
+                                        }
+                                    >
+                                        <ExternalLinksTab />
                                     </MSKTab>
 
                                     {this.resourceTabs.component}

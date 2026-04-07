@@ -401,13 +401,18 @@ export type StudyViewPageTabKey =
     | StudyViewPageTabKeyEnum.CLINICAL_DATA
     | StudyViewPageTabKeyEnum.SUMMARY
     | StudyViewPageTabKeyEnum.HEATMAPS
-    | StudyViewPageTabKeyEnum.CN_SEGMENTS;
+    | StudyViewPageTabKeyEnum.CN_SEGMENTS
+    | StudyViewPageTabKeyEnum.FILES_AND_LINKS
+    | StudyViewPageTabKeyEnum.PLOTS
+    | StudyViewPageTabKeyEnum.EXTERNAL_LINKS;
 
 export enum StudyViewPageTabDescriptions {
     SUMMARY = 'Summary',
     CLINICAL_DATA = 'Clinical Data',
     HEATMAPS = 'Heatmaps',
     CN_SEGMENTS = 'CN Segments',
+    FILES_AND_LINKS = 'Files & Links',
+    EXTERNAL_LINKS = 'External Links',
     PLOTS = 'Plots',
 }
 

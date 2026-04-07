@@ -70,7 +70,10 @@ export default class Visualize extends React.Component<{}, {}> {
                     </title>
                 </Helmet>
 
-                <h1>Visualize Your Data</h1>
+                <h1>
+                    Visualize Your Data: UT SOUTHWESTERN DEVELOPMENT REALTIME
+                    VERIFICATION
+                </h1>
 
                 <h2 id="download-and-install-a-local-version-of-cbioportal">
                     1. Download and install a local version of cBioPortal
