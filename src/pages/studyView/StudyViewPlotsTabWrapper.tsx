@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { Button } from 'react-bootstrap';
+import { Button, FormControl } from 'react-bootstrap';
 import _ from 'lodash';
 import { StudyViewPageStore } from 'pages/studyView/StudyViewPageStore';
 import StudyViewURLWrapper from 'pages/studyView/StudyViewURLWrapper';
 import { observer } from 'mobx-react';
 import PlotsTab from 'shared/components/plots/PlotsTab';
+import CustomHeatmap from 'pages/studyView/CustomHeatmap';
 
 function makePlotQuery(baseQuery: any) {
     const query = _.cloneDeep(baseQuery);
@@ -27,6 +28,10 @@ const StudyViewPlotInstance = observer(function({
         makePlotQuery(urlWrapper.query)
     );
 
+    const [visualizationType, setVisualizationType] = React.useState<
+        'plot' | 'heatmap'
+    >('plot');
+
     const localUrlWrapper = React.useMemo(() => {
         return {
             get query() {
@@ -43,65 +48,90 @@ const StudyViewPlotInstance = observer(function({
     }, [localQuery]);
 
     return (
-        <PlotsTab
-            filteredSamplesByDetailedCancerType={
-                store.filteredSamplesByDetailedCancerType
-            }
-            mutations={store.mutations}
-            studies={store.queriedPhysicalStudies}
-            molecularProfileIdSuffixToMolecularProfiles={
-                store.molecularProfileIdSuffixToMolecularProfiles
-            }
-            entrezGeneIdToGene={store.entrezGeneIdToGeneAll}
-            sampleKeyToSample={store.sampleSetByKey}
-            genes={store.allGenes}
-            clinicalAttributes={store.clinicalAttributes}
-            genesets={store.genesets}
-            genericAssayEntitiesGroupByMolecularProfileId={
-                store.genericAssayEntitiesGroupedByProfileId
-            }
-            customAttributes={store.customAttributes}
-            studyIds={store.queriedPhysicalStudyIds}
-            molecularProfilesWithData={store.molecularProfilesInStudies}
-            molecularProfilesInStudies={store.molecularProfilesInStudies}
-            annotatedCnaCache={store.annotatedCnaCache}
-            annotatedMutationCache={store.annotatedMutationCache}
-            structuralVariantCache={store.structuralVariantCache}
-            studyToMutationMolecularProfile={
-                store.studyToMutationMolecularProfile
-            }
-            studyToMolecularProfileDiscreteCna={
-                store.studyToMolecularProfileDiscreteCna
-            }
-            clinicalDataCache={store.clinicalDataCache}
-            patientKeyToFilteredSamples={store.patientKeyToFilteredSamples}
-            numericGeneMolecularDataCache={store.numericGeneMolecularDataCache}
-            coverageInformation={store.coverageInformation}
-            filteredSamples={store.selectedSamples}
-            genesetMolecularDataCache={store.genesetMolecularDataCache}
-            genericAssayMolecularDataCache={
-                store.genericAssayMolecularDataCache
-            }
-            studyToStructuralVariantMolecularProfile={
-                store.studyToStructuralVariantMolecularProfile
-            }
-            driverAnnotationSettings={store.driverAnnotationSettings}
-            studyIdToStudy={store.studyIdToStudy.result}
-            structuralVariants={store.structuralVariants.result}
-            hugoGeneSymbols={store.allHugoGeneSymbols.result}
-            selectedGenericAssayEntitiesGroupByMolecularProfileId={
-                store.selectedGenericAssayEntitiesGroupByMolecularProfileId
-            }
-            molecularProfileIdToMolecularProfile={
-                store.molecularProfileIdToMolecularProfile
-            }
-            urlWrapper={localUrlWrapper as any}
-            hasNoQueriedGenes={true}
-            genePanelDataForAllProfiles={
-                store.genePanelDataForAllProfiles.result
-            }
-            patients={store.patients}
-        />
+        <div>
+            <div style={{ marginBottom: 12 }}>
+                <label style={{ marginRight: 8 }}>Visualization type:</label>
+                <FormControl
+                    componentClass="select"
+                    value={visualizationType}
+                    onChange={(e: any) => setVisualizationType(e.target.value)}
+                    style={{ width: 220, display: 'inline-block' }}
+                >
+                    <option value="plot">Standard Plot</option>
+                    <option value="heatmap">Heatmap</option>
+                </FormControl>
+            </div>
+
+            {visualizationType === 'heatmap' ? (
+                <CustomHeatmap samples={store.selectedSamples.result || []} />
+            ) : (
+                <PlotsTab
+                    filteredSamplesByDetailedCancerType={
+                        store.filteredSamplesByDetailedCancerType
+                    }
+                    mutations={store.mutations}
+                    studies={store.queriedPhysicalStudies}
+                    molecularProfileIdSuffixToMolecularProfiles={
+                        store.molecularProfileIdSuffixToMolecularProfiles
+                    }
+                    entrezGeneIdToGene={store.entrezGeneIdToGeneAll}
+                    sampleKeyToSample={store.sampleSetByKey}
+                    genes={store.allGenes}
+                    clinicalAttributes={store.clinicalAttributes}
+                    genesets={store.genesets}
+                    genericAssayEntitiesGroupByMolecularProfileId={
+                        store.genericAssayEntitiesGroupedByProfileId
+                    }
+                    customAttributes={store.customAttributes}
+                    studyIds={store.queriedPhysicalStudyIds}
+                    molecularProfilesWithData={store.molecularProfilesInStudies}
+                    molecularProfilesInStudies={
+                        store.molecularProfilesInStudies
+                    }
+                    annotatedCnaCache={store.annotatedCnaCache}
+                    annotatedMutationCache={store.annotatedMutationCache}
+                    structuralVariantCache={store.structuralVariantCache}
+                    studyToMutationMolecularProfile={
+                        store.studyToMutationMolecularProfile
+                    }
+                    studyToMolecularProfileDiscreteCna={
+                        store.studyToMolecularProfileDiscreteCna
+                    }
+                    clinicalDataCache={store.clinicalDataCache}
+                    patientKeyToFilteredSamples={
+                        store.patientKeyToFilteredSamples
+                    }
+                    numericGeneMolecularDataCache={
+                        store.numericGeneMolecularDataCache
+                    }
+                    coverageInformation={store.coverageInformation}
+                    filteredSamples={store.selectedSamples}
+                    genesetMolecularDataCache={store.genesetMolecularDataCache}
+                    genericAssayMolecularDataCache={
+                        store.genericAssayMolecularDataCache
+                    }
+                    studyToStructuralVariantMolecularProfile={
+                        store.studyToStructuralVariantMolecularProfile
+                    }
+                    driverAnnotationSettings={store.driverAnnotationSettings}
+                    studyIdToStudy={store.studyIdToStudy.result}
+                    structuralVariants={store.structuralVariants.result}
+                    hugoGeneSymbols={store.allHugoGeneSymbols.result}
+                    selectedGenericAssayEntitiesGroupByMolecularProfileId={
+                        store.selectedGenericAssayEntitiesGroupByMolecularProfileId
+                    }
+                    molecularProfileIdToMolecularProfile={
+                        store.molecularProfileIdToMolecularProfile
+                    }
+                    urlWrapper={localUrlWrapper as any}
+                    hasNoQueriedGenes={true}
+                    genePanelDataForAllProfiles={
+                        store.genePanelDataForAllProfiles.result
+                    }
+                    patients={store.patients}
+                />
+            )}
+        </div>
     );
 });
 
