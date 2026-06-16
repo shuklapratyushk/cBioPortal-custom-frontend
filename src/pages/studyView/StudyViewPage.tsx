@@ -28,6 +28,7 @@ import { StudySummaryTab } from 'pages/studyView/tabs/SummaryTab';
 import StudyPageHeader from './studyPageHeader/StudyPageHeader';
 import CNSegments from './tabs/CNSegments';
 import ExternalLinksTab from './tabs/ExternalLinksTab';
+import PatientTimelineTab from './tabs/PatientTimelineTab';
 import { getInternalClient } from 'shared/api/cbioportalInternalClientInstance';
 import AddChartButton from './addChartButton/AddChartButton';
 import { sleep } from '../../shared/lib/TimeUtils';
@@ -778,6 +779,24 @@ export default class StudyViewPage extends React.Component<
                                         }
                                     >
                                         <ExternalLinksTab />
+                                    </MSKTab>
+
+                                    <MSKTab
+                                        key={7}
+                                        id={
+                                            StudyViewPageTabKeyEnum.PATIENT_TIMELINE
+                                        }
+                                        linkText={
+                                            StudyViewPageTabDescriptions.PATIENT_TIMELINE
+                                        }
+                                    >
+                                        <PatientTimelineTab
+                                            studyId={
+                                                this.store
+                                                    .queriedPhysicalStudyIds
+                                                    .result[0] || 'rcc_thrombus'
+                                            }
+                                        />
                                     </MSKTab>
 
                                     {this.resourceTabs.component}

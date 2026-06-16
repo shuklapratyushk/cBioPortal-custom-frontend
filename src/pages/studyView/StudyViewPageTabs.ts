@@ -5,6 +5,7 @@ export enum StudyViewPageTabKeyEnum {
     CN_SEGMENTS = 'cnSegments',
     FILES_AND_LINKS = 'filesAndLinks',
     EXTERNAL_LINKS = 'externalLinks',
+    PATIENT_TIMELINE = 'patientTimeline',
     PLOTS = 'plots',
 }
 
