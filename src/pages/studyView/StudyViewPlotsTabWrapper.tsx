@@ -63,7 +63,13 @@ const StudyViewPlotInstance = observer(function({
             </div>
 
             {visualizationType === 'heatmap' ? (
-                <CustomHeatmap samples={store.selectedSamples.result || []} />
+                <CustomHeatmap
+                    studyId={
+                        store.queriedPhysicalStudyIds.result[0] ||
+                        'rcc_thrombus'
+                    }
+                    samples={store.selectedSamples.result || []}
+                />
             ) : (
                 <PlotsTab
                     filteredSamplesByDetailedCancerType={

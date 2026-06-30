@@ -1,18 +1,26 @@
 import * as React from 'react';
+import { FormControl } from 'react-bootstrap';
+
+type Props = {
+    studyId: string;
+};
 
 type Patient = {
     patientId: string;
-    studyId?: string;
 };
 
 type ClinicalEvent = {
     patientId?: string;
+    eventType?: string;
+    eventTypeDetailed?: string;
     startNumberOfDaysSinceDiagnosis?: number;
     stopNumberOfDaysSinceDiagnosis?: number;
     startDate?: number;
     stopDate?: number;
-    eventType?: string;
-    eventTypeDetailed?: string;
+    START_DATE?: number;
+    STOP_DATE?: number;
+    EVENT_TYPE?: string;
+    EVENT_TYPE_DETAILED?: string;
     attributes?: Array<{
         key?: string;
         attributeId?: string;
@@ -54,13 +62,15 @@ function getDetailedType(event: ClinicalEvent) {
 
 function getAttributeValue(event: ClinicalEvent, key: string) {
     const attrs = event.attributes || [];
+
     const match = attrs.find(
-        a =>
-            a.key === key ||
-            a.attributeId === key ||
-            a.key?.toLowerCase() === key.toLowerCase() ||
-            a.attributeId?.toLowerCase() === key.toLowerCase()
+        attr =>
+            attr.key === key ||
+            attr.attributeId === key ||
+            attr.key?.toLowerCase() === key.toLowerCase() ||
+            attr.attributeId?.toLowerCase() === key.toLowerCase()
     );
+
     return match?.value;
 }
 
@@ -92,16 +102,38 @@ function getEventTitle(event: ClinicalEvent) {
 function getUsefulDetails(event: ClinicalEvent) {
     const attrs = event.attributes || [];
 
-    if (!attrs.length) {
-        return [];
-    }
-
     return attrs
         .filter(attr => attr.value !== undefined && attr.value !== '')
         .map(attr => ({
             key: attr.key || attr.attributeId || 'Attribute',
             value: attr.value || '',
         }));
+}
+
+function inferSampleCategory(sampleId: string) {
+    if (!sampleId) return 'Unknown';
+
+    if (sampleId.includes('Th')) return 'Thrombus';
+    if (sampleId.includes('M')) return 'Metastasis';
+    if (sampleId.includes('N')) return 'Normal';
+    if (sampleId.includes('T')) return 'Primary tumor';
+
+    return 'Specimen';
+}
+
+function inferAssays(sampleId: string, eventType: string) {
+    const isSpecimen = eventType === 'Specimen';
+
+    return {
+        rnaSeq: isSpecimen,
+        wes:
+            isSpecimen &&
+            (sampleId.startsWith('XP1') || sampleId.startsWith('XP2')),
+        freshFrozen: isSpecimen,
+        dmso: false,
+        tumorgraph: false,
+        organoid: false,
+    };
 }
 
 function getBadgeStyle(eventType: string): React.CSSProperties {
@@ -133,12 +165,15 @@ function getBadgeStyle(eventType: string): React.CSSProperties {
     return { ...base, background: '#eee', color: '#444' };
 }
 
-export default function PatientTimelineTab({ studyId }: { studyId: string }) {
+export default function PatientTimelineTab({ studyId }: Props) {
     const [patients, setPatients] = React.useState<Patient[]>([]);
     const [selectedPatientId, setSelectedPatientId] = React.useState('');
     const [events, setEvents] = React.useState<ClinicalEvent[]>([]);
     const [loadingPatients, setLoadingPatients] = React.useState(false);
     const [loadingEvents, setLoadingEvents] = React.useState(false);
+    const [showDay0SpecimensOnly, setShowDay0SpecimensOnly] = React.useState(
+        false
+    );
     const [error, setError] = React.useState('');
 
     React.useEffect(() => {
@@ -158,10 +193,10 @@ export default function PatientTimelineTab({ studyId }: { studyId: string }) {
                 }
 
                 const data = await response.json();
+
                 const sortedPatients = data
-                    .map((p: any) => ({
-                        patientId: p.patientId,
-                        studyId: p.studyId,
+                    .map((patient: any) => ({
+                        patientId: patient.patientId,
                     }))
                     .sort((a: Patient, b: Patient) =>
                         a.patientId.localeCompare(b.patientId)
@@ -185,7 +220,7 @@ export default function PatientTimelineTab({ studyId }: { studyId: string }) {
     }, [studyId]);
 
     React.useEffect(() => {
-        async function loadClinicalEvents() {
+        async function loadEvents() {
             if (!selectedPatientId) {
                 return;
             }
@@ -213,114 +248,135 @@ export default function PatientTimelineTab({ studyId }: { studyId: string }) {
 
                 setEvents(sortedEvents);
             } catch (err) {
-                setError(
-                    `${err.message}. If this endpoint differs in this cBioPortal version, we will inspect the generated API client and swap in the correct endpoint.`
-                );
+                setError(err.message || 'Could not load patient events.');
                 setEvents([]);
             } finally {
                 setLoadingEvents(false);
             }
         }
 
-        loadClinicalEvents();
+        loadEvents();
     }, [studyId, selectedPatientId]);
 
-    const groupedEvents = events.reduce((acc, event) => {
+    const inventoryEvents = showDay0SpecimensOnly
+        ? events.filter(
+              event =>
+                  getEventType(event) === 'Specimen' && getEventDay(event) === 0
+          )
+        : events;
+
+    const groupedByDay = inventoryEvents.reduce((acc, event) => {
         const day = getEventDay(event);
+
         if (!acc[day]) {
             acc[day] = [];
         }
+
         acc[day].push(event);
         return acc;
     }, {} as { [day: string]: ClinicalEvent[] });
 
-    const sortedDays = Object.keys(groupedEvents)
+    const sortedDays = Object.keys(groupedByDay)
         .map(Number)
         .sort((a, b) => a - b);
 
     return (
         <div style={{ padding: 24 }}>
-            <h3>Patient Timeline</h3>
+            <h3>Research Tools</h3>
 
             <p style={{ color: '#666', maxWidth: 950 }}>
-                This tab visualizes imported cBioPortal clinical timeline events
-                for the selected patient, including specimens, treatments,
-                surgeries, and status changes.
+                Prototype research-specific longitudinal sample inventory. This
+                extends beyond the native clinical timeline by focusing on what
+                samples exist for each patient and what downstream resources may
+                be connected to those samples.
             </p>
 
             <div
                 style={{
-                    marginTop: 16,
-                    marginBottom: 24,
                     display: 'flex',
-                    alignItems: 'center',
                     gap: 12,
+                    marginBottom: 16,
+                    alignItems: 'flex-end',
                 }}
             >
-                <label style={{ fontWeight: 700 }}>Patient:</label>
+                <div>
+                    <label>Patient</label>
+                    <FormControl
+                        componentClass="select"
+                        value={selectedPatientId}
+                        onChange={(e: any) =>
+                            setSelectedPatientId(e.target.value)
+                        }
+                        disabled={loadingPatients}
+                        style={{ width: 240 }}
+                    >
+                        {patients.map(patient => (
+                            <option
+                                key={patient.patientId}
+                                value={patient.patientId}
+                            >
+                                {patient.patientId}
+                            </option>
+                        ))}
+                    </FormControl>
+                </div>
 
-                <select
-                    value={selectedPatientId}
-                    onChange={e => setSelectedPatientId(e.target.value)}
-                    disabled={loadingPatients}
-                    style={{
-                        padding: '6px 10px',
-                        minWidth: 220,
-                    }}
-                >
-                    {patients.map(patient => (
-                        <option
-                            key={patient.patientId}
-                            value={patient.patientId}
-                        >
-                            {patient.patientId}
-                        </option>
-                    ))}
-                </select>
-
-                <span style={{ color: '#666' }}>
+                <div style={{ paddingBottom: 7, color: '#666' }}>
                     {patients.length} patients loaded from {studyId}
-                </span>
+                </div>
             </div>
 
-            {error && (
-                <div
-                    style={{
-                        padding: 12,
-                        background: '#fff3cd',
-                        border: '1px solid #ffeeba',
-                        borderRadius: 4,
-                        marginBottom: 16,
-                        color: '#856404',
-                    }}
-                >
-                    {error}
+            <div style={{ marginBottom: 24 }}>
+                <label style={{ fontWeight: 400 }}>
+                    <input
+                        type="checkbox"
+                        checked={showDay0SpecimensOnly}
+                        onChange={e =>
+                            setShowDay0SpecimensOnly(e.target.checked)
+                        }
+                        style={{ marginRight: 8 }}
+                    />
+                    Show Day 0 specimen collection only
+                </label>
+            </div>
+
+            {error && <div className="alert alert-warning">{error}</div>}
+
+            {(loadingPatients || loadingEvents) && (
+                <div>Loading inventory...</div>
+            )}
+
+            {!loadingEvents && inventoryEvents.length === 0 && (
+                <div>
+                    {showDay0SpecimensOnly
+                        ? 'No Day 0 specimen collection events found for this patient.'
+                        : 'No longitudinal events found for this patient.'}
                 </div>
             )}
 
-            {(loadingPatients || loadingEvents) && (
-                <div>Loading timeline...</div>
-            )}
-
-            {!loadingEvents && !error && events.length === 0 && (
-                <div>No timeline events found for this patient.</div>
-            )}
-
-            {!loadingEvents && events.length > 0 && (
+            {!loadingEvents && inventoryEvents.length > 0 && (
                 <div>
+                    <h4>Longitudinal sample inventory</h4>
+
                     <div style={{ marginBottom: 16, color: '#666' }}>
-                        Showing {events.length} timeline events for{' '}
+                        Showing {inventoryEvents.length} events for{' '}
                         <strong>{selectedPatientId}</strong>.
                     </div>
 
                     {sortedDays.map(day => (
-                        <div key={day} style={{ marginBottom: 28 }}>
+                        <div
+                            key={day}
+                            style={{
+                                display: 'flex',
+                                gap: 20,
+                                marginBottom: 24,
+                            }}
+                        >
                             <div
                                 style={{
+                                    width: 90,
                                     fontWeight: 800,
                                     color: '#1f77b4',
-                                    marginBottom: 8,
-                                    fontSize: 16,
                                 }}
                             >
                                 Day {day}
@@ -330,50 +386,128 @@ export default function PatientTimelineTab({ studyId }: { studyId: string }) {
                                 style={{
                                     borderLeft: '3px solid #1f77b4',
                                     paddingLeft: 18,
+                                    flex: 1,
                                 }}
                             >
-                                {groupedEvents[day].map((event, index) => {
-                                    const type = getEventType(event);
+                                {groupedByDay[day].map((event, index) => {
+                                    const eventType = getEventType(event);
                                     const stopDay = getStopDay(event);
+                                    const title = getEventTitle(event);
                                     const details = getUsefulDetails(event);
+
+                                    const sampleId =
+                                        getAttributeValue(event, 'SAMPLE_ID') ||
+                                        (eventType === 'Specimen'
+                                            ? `Specimen ${index + 1}`
+                                            : title);
+
+                                    const category =
+                                        eventType === 'Specimen'
+                                            ? inferSampleCategory(sampleId)
+                                            : getDetailedType(event) ||
+                                              eventType;
+
+                                    const assays = inferAssays(
+                                        sampleId,
+                                        eventType
+                                    );
 
                                     return (
                                         <div
-                                            key={`${day}-${type}-${index}`}
+                                            key={`${day}-${eventType}-${index}`}
                                             style={{
-                                                padding: 14,
-                                                marginBottom: 12,
                                                 border: '1px solid #ddd',
                                                 borderRadius: 6,
+                                                padding: 14,
+                                                marginBottom: 12,
                                                 background: '#fff',
-                                                boxShadow:
-                                                    '0 1px 2px rgba(0,0,0,0.04)',
                                             }}
                                         >
-                                            <div style={{ marginBottom: 6 }}>
-                                                <span
-                                                    style={getBadgeStyle(type)}
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    justifyContent:
+                                                        'space-between',
+                                                    alignItems: 'center',
+                                                }}
+                                            >
+                                                <div>
+                                                    <span
+                                                        style={getBadgeStyle(
+                                                            eventType
+                                                        )}
+                                                    >
+                                                        {eventType}
+                                                    </span>
+
+                                                    <strong>{title}</strong>
+
+                                                    <span
+                                                        style={{
+                                                            marginLeft: 8,
+                                                            color: '#666',
+                                                        }}
+                                                    >
+                                                        {category}
+                                                    </span>
+
+                                                    {stopDay !== undefined &&
+                                                        stopDay !== day && (
+                                                            <span
+                                                                style={{
+                                                                    marginLeft: 8,
+                                                                    color:
+                                                                        '#666',
+                                                                }}
+                                                            >
+                                                                through day{' '}
+                                                                {stopDay}
+                                                            </span>
+                                                        )}
+                                                </div>
+                                            </div>
+
+                                            {eventType === 'Specimen' && (
+                                                <div
+                                                    style={{
+                                                        marginTop: 10,
+                                                        display: 'flex',
+                                                        gap: 8,
+                                                        flexWrap: 'wrap',
+                                                    }}
                                                 >
-                                                    {type}
-                                                </span>
-
-                                                <strong>
-                                                    {getEventTitle(event)}
-                                                </strong>
-
-                                                {stopDay !== undefined &&
-                                                    stopDay !== day && (
-                                                        <span
-                                                            style={{
-                                                                marginLeft: 8,
-                                                                color: '#666',
-                                                            }}
-                                                        >
-                                                            through day{' '}
-                                                            {stopDay}
+                                                    {assays.freshFrozen && (
+                                                        <span className="label label-info">
+                                                            Fresh frozen
                                                         </span>
                                                     )}
-                                            </div>
+                                                    {assays.rnaSeq && (
+                                                        <span className="label label-success">
+                                                            RNA-seq
+                                                        </span>
+                                                    )}
+                                                    {assays.wes && (
+                                                        <span className="label label-primary">
+                                                            WES
+                                                        </span>
+                                                    )}
+                                                    {assays.dmso && (
+                                                        <span className="label label-warning">
+                                                            DMSO
+                                                        </span>
+                                                    )}
+                                                    {assays.tumorgraph && (
+                                                        <span className="label label-danger">
+                                                            TumorGraph
+                                                        </span>
+                                                    )}
+                                                    {assays.organoid && (
+                                                        <span className="label label-default">
+                                                            Organoid
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
 
                                             {details.length > 0 && (
                                                 <div
@@ -382,7 +516,7 @@ export default function PatientTimelineTab({ studyId }: { studyId: string }) {
                                                         gridTemplateColumns:
                                                             'repeat(auto-fit, minmax(180px, 1fr))',
                                                         gap: 8,
-                                                        marginTop: 10,
+                                                        marginTop: 12,
                                                     }}
                                                 >
                                                     {details.map(
@@ -406,6 +540,21 @@ export default function PatientTimelineTab({ studyId }: { studyId: string }) {
                                                             </div>
                                                         )
                                                     )}
+                                                </div>
+                                            )}
+
+                                            {eventType === 'Specimen' && (
+                                                <div
+                                                    style={{
+                                                        marginTop: 10,
+                                                        color: '#777',
+                                                        fontSize: 12,
+                                                    }}
+                                                >
+                                                    Placeholder derivative
+                                                    labels will later be
+                                                    replaced with real inventory
+                                                    / TumorGraph tables.
                                                 </div>
                                             )}
                                         </div>

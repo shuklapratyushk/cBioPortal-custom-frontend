@@ -414,7 +414,7 @@ export enum StudyViewPageTabDescriptions {
     CN_SEGMENTS = 'CN Segments',
     FILES_AND_LINKS = 'Files & Links',
     EXTERNAL_LINKS = 'External Links',
-    PATIENT_TIMELINE = 'Patient Timeline',
+    PATIENT_TIMELINE = 'Research Tools',
     PLOTS = 'Plots',
 }
 
