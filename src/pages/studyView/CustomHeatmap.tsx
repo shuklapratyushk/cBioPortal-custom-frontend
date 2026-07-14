@@ -35,7 +35,9 @@ function getGlobalMinMaxCellColor(
     min: number,
     max: number
 ) {
-    if (value === undefined || Number.isNaN(value)) return '#eee';
+    if (value === undefined || Number.isNaN(value)) {
+        return '#eee';
+    }
 
     const midpoint = (min + max) / 2;
 
@@ -54,7 +56,9 @@ function getGlobalMinMaxCellColor(
 }
 
 function getRowZScoreCellColor(value: number | undefined) {
-    if (value === undefined || Number.isNaN(value)) return '#eee';
+    if (value === undefined || Number.isNaN(value)) {
+        return '#eee';
+    }
 
     const clipped = Math.max(-2, Math.min(2, value));
     const intensity = Math.abs(clipped) / 2;
@@ -110,6 +114,111 @@ function calculateRowZScores(
     });
 
     return zScoresBySampleGene;
+}
+
+function HeatmapColorKey({
+    normalizationMode,
+    globalMin,
+    globalMax,
+}: {
+    normalizationMode: NormalizationMode;
+    globalMin: number;
+    globalMax: number;
+}) {
+    const isZScore = normalizationMode === 'rowZScore';
+
+    const minimumLabel = isZScore ? '≤ -2' : globalMin.toFixed(2);
+    const midpointLabel = isZScore
+        ? '0'
+        : ((globalMin + globalMax) / 2).toFixed(2);
+    const maximumLabel = isZScore ? '≥ +2' : globalMax.toFixed(2);
+
+    return (
+        <div
+            style={{
+                display: 'inline-block',
+                marginTop: 14,
+                marginBottom: 14,
+                padding: 12,
+                border: '1px solid #ddd',
+                borderRadius: 6,
+                background: '#fafafa',
+            }}
+        >
+            <div
+                style={{
+                    fontWeight: 700,
+                    fontSize: 12,
+                    marginBottom: 8,
+                }}
+            >
+                Color key
+            </div>
+
+            <div
+                style={{
+                    width: 260,
+                    height: 18,
+                    border: '1px solid #aaa',
+                    background:
+                        'linear-gradient(to right, rgba(33, 102, 172, 1), rgba(33, 102, 172, 0.15), rgba(178, 24, 43, 0.15), rgba(178, 24, 43, 1))',
+                }}
+            />
+
+            <div
+                style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    width: 260,
+                    marginTop: 4,
+                    fontSize: 11,
+                    color: '#555',
+                }}
+            >
+                <span>{minimumLabel}</span>
+                <span>{midpointLabel}</span>
+                <span>{maximumLabel}</span>
+            </div>
+
+            <div
+                style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    width: 260,
+                    marginTop: 5,
+                    fontSize: 11,
+                    color: '#666',
+                }}
+            >
+                <span>{isZScore ? 'Below gene mean' : 'Lower expression'}</span>
+                <span>
+                    {isZScore ? 'Above gene mean' : 'Higher expression'}
+                </span>
+            </div>
+
+            <div
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginTop: 8,
+                    fontSize: 11,
+                    color: '#666',
+                }}
+            >
+                <span
+                    style={{
+                        display: 'inline-block',
+                        width: 16,
+                        height: 16,
+                        background: '#eee',
+                        border: '1px solid #ccc',
+                    }}
+                />
+                Missing value
+            </div>
+        </div>
+    );
 }
 
 export default function CustomHeatmap({ studyId, samples }: Props) {
@@ -192,7 +301,9 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
                 '/api/genes/fetch?geneIdType=HUGO_GENE_SYMBOL&projection=SUMMARY',
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify(geneSymbols),
                 }
             );
@@ -214,7 +325,9 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
                 `/api/molecular-profiles/${selectedProfileId}/molecular-data/fetch?projection=DETAILED`,
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify({
                         entrezGeneIds,
                         sampleIds,
@@ -239,12 +352,15 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
 
     const rawValues = data
         .map(datum => datum.value)
-        .filter(value => value !== undefined && !Number.isNaN(value));
+        .filter(
+            value => value !== undefined && !Number.isNaN(value)
+        ) as number[];
 
     const globalMin = rawValues.length ? Math.min(...rawValues) : 0;
     const globalMax = rawValues.length ? Math.max(...rawValues) : 1;
 
     const dataBySampleGene: { [key: string]: number } = {};
+
     data.forEach(datum => {
         dataBySampleGene[`${datum.sampleId}_${datum.entrezGeneId}`] =
             datum.value;
@@ -280,7 +396,9 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
                     <FormControl
                         type="text"
                         value={geneText}
-                        onChange={(e: any) => setGeneText(e.target.value)}
+                        onChange={(event: any) =>
+                            setGeneText(event.target.value)
+                        }
                         style={{ width: 360 }}
                     />
                 </div>
@@ -290,8 +408,8 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
                     <FormControl
                         componentClass="select"
                         value={selectedProfileId}
-                        onChange={(e: any) =>
-                            setSelectedProfileId(e.target.value)
+                        onChange={(event: any) =>
+                            setSelectedProfileId(event.target.value)
                         }
                         style={{ width: 300 }}
                     >
@@ -311,8 +429,8 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
                     <FormControl
                         componentClass="select"
                         value={normalizationMode}
-                        onChange={(e: any) =>
-                            setNormalizationMode(e.target.value)
+                        onChange={(event: any) =>
+                            setNormalizationMode(event.target.value)
                         }
                         style={{ width: 220 }}
                     >
@@ -346,109 +464,141 @@ export default function CustomHeatmap({ studyId, samples }: Props) {
             </div>
 
             {genes.length > 0 && (
-                <div style={{ overflowX: 'auto', border: '1px solid #ddd' }}>
-                    <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
-                        <thead>
-                            <tr>
-                                <th
-                                    style={{
-                                        padding: 6,
-                                        border: '1px solid #ddd',
-                                        background: '#f5f5f5',
-                                        position: 'sticky',
-                                        left: 0,
-                                        zIndex: 2,
-                                    }}
-                                >
-                                    Gene
-                                </th>
-                                {visibleSamples.map(sample => (
+                <div>
+                    <HeatmapColorKey
+                        normalizationMode={normalizationMode}
+                        globalMin={globalMin}
+                        globalMax={globalMax}
+                    />
+
+                    <div
+                        style={{
+                            overflowX: 'auto',
+                            border: '1px solid #ddd',
+                        }}
+                    >
+                        <table
+                            style={{
+                                borderCollapse: 'collapse',
+                                fontSize: 12,
+                            }}
+                        >
+                            <thead>
+                                <tr>
                                     <th
-                                        key={sample.sampleId}
                                         style={{
                                             padding: 6,
                                             border: '1px solid #ddd',
                                             background: '#f5f5f5',
-                                            writingMode: 'vertical-rl',
-                                            transform: 'rotate(180deg)',
-                                            maxHeight: 120,
-                                        }}
-                                    >
-                                        {sample.sampleId}
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-
-                        <tbody>
-                            {genes.map(gene => (
-                                <tr key={gene.entrezGeneId}>
-                                    <td
-                                        style={{
-                                            padding: 6,
-                                            border: '1px solid #ddd',
-                                            fontWeight: 700,
-                                            background: '#fafafa',
                                             position: 'sticky',
                                             left: 0,
+                                            zIndex: 2,
                                         }}
                                     >
-                                        {gene.hugoGeneSymbol}
-                                    </td>
+                                        Gene
+                                    </th>
 
-                                    {visibleSamples.map(sample => {
-                                        const key = `${sample.sampleId}_${gene.entrezGeneId}`;
-                                        const rawValue = dataBySampleGene[key];
-
-                                        const displayedValue =
-                                            normalizationMode === 'rowZScore'
-                                                ? rowZScoresBySampleGene[key]
-                                                : rawValue;
-
-                                        const background =
-                                            normalizationMode === 'rowZScore'
-                                                ? getRowZScoreCellColor(
-                                                      displayedValue
-                                                  )
-                                                : getGlobalMinMaxCellColor(
-                                                      rawValue,
-                                                      globalMin,
-                                                      globalMax
-                                                  );
-
-                                        const valueLabel =
-                                            displayedValue !== undefined
-                                                ? displayedValue.toFixed(3)
-                                                : 'NA';
-
-                                        const rawValueLabel =
-                                            rawValue !== undefined
-                                                ? rawValue.toFixed(3)
-                                                : 'NA';
-
-                                        return (
-                                            <td
-                                                key={`${sample.sampleId}-${gene.entrezGeneId}`}
-                                                title={`${sample.sampleId} | ${gene.hugoGeneSymbol} | displayed: ${valueLabel} | raw: ${rawValueLabel}`}
-                                                style={{
-                                                    width: 24,
-                                                    height: 24,
-                                                    border: '1px solid #eee',
-                                                    background,
-                                                    textAlign: 'center',
-                                                }}
-                                            />
-                                        );
-                                    })}
+                                    {visibleSamples.map(sample => (
+                                        <th
+                                            key={sample.sampleId}
+                                            style={{
+                                                padding: 6,
+                                                border: '1px solid #ddd',
+                                                background: '#f5f5f5',
+                                                writingMode: 'vertical-rl',
+                                                transform: 'rotate(180deg)',
+                                                maxHeight: 120,
+                                            }}
+                                        >
+                                            {sample.sampleId}
+                                        </th>
+                                    ))}
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+
+                            <tbody>
+                                {genes.map(gene => (
+                                    <tr key={gene.entrezGeneId}>
+                                        <td
+                                            style={{
+                                                padding: 6,
+                                                border: '1px solid #ddd',
+                                                fontWeight: 700,
+                                                background: '#fafafa',
+                                                position: 'sticky',
+                                                left: 0,
+                                            }}
+                                        >
+                                            {gene.hugoGeneSymbol}
+                                        </td>
+
+                                        {visibleSamples.map(sample => {
+                                            const key = `${sample.sampleId}_${gene.entrezGeneId}`;
+
+                                            const rawValue =
+                                                dataBySampleGene[key];
+
+                                            const displayedValue =
+                                                normalizationMode ===
+                                                'rowZScore'
+                                                    ? rowZScoresBySampleGene[
+                                                          key
+                                                      ]
+                                                    : rawValue;
+
+                                            const background =
+                                                normalizationMode ===
+                                                'rowZScore'
+                                                    ? getRowZScoreCellColor(
+                                                          displayedValue
+                                                      )
+                                                    : getGlobalMinMaxCellColor(
+                                                          rawValue,
+                                                          globalMin,
+                                                          globalMax
+                                                      );
+
+                                            const valueLabel =
+                                                displayedValue !== undefined
+                                                    ? displayedValue.toFixed(3)
+                                                    : 'NA';
+
+                                            const rawValueLabel =
+                                                rawValue !== undefined
+                                                    ? rawValue.toFixed(3)
+                                                    : 'NA';
+
+                                            return (
+                                                <td
+                                                    key={`${sample.sampleId}-${gene.entrezGeneId}`}
+                                                    title={`${sample.sampleId} | ${gene.hugoGeneSymbol} | displayed: ${valueLabel} | raw: ${rawValueLabel}`}
+                                                    style={{
+                                                        width: 24,
+                                                        height: 24,
+                                                        border:
+                                                            '1px solid #eee',
+                                                        background,
+                                                        textAlign: 'center',
+                                                    }}
+                                                />
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
 
             {genes.length > 0 && (
-                <div style={{ marginTop: 10, color: '#666', fontSize: 12 }}>
+                <div
+                    style={{
+                        marginTop: 10,
+                        color: '#666',
+                        fontSize: 12,
+                    }}
+                >
                     Row-wise z-score: each gene row is centered by its own mean
                     and scaled by its own standard deviation across the
                     displayed samples. Values are clipped visually at ±2
