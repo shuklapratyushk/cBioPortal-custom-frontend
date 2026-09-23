@@ -75,6 +75,46 @@ type HttpError = Error & {
     status?: number;
 };
 
+type MolecularProfile = {
+    molecularProfileId: string;
+    name?: string;
+    molecularAlterationType?: string;
+    datatype?: string;
+};
+
+type MutationRecord = {
+    sampleId: string;
+    chr?: string;
+    startPosition?: number;
+    referenceAllele?: string;
+    variantAllele?: string;
+    tumorSeqAllele2?: string;
+    proteinChange?: string;
+    variantType?: string;
+    mutationType?: string;
+    gene?: {
+        hugoGeneSymbol?: string;
+    };
+};
+
+type MutationComparison = {
+    sourceComparableCount: number;
+    tumorGraftComparableCount: number;
+    sharedCount: number;
+    sourceOnlyCount: number;
+    tumorGraftOnlyCount: number;
+    unionCount: number;
+    retention: number;
+    jaccard: number;
+    excludedSourceCount: number;
+    excludedTumorGraftCount: number;
+    shared: MutationRecord[];
+    sourceOnly: MutationRecord[];
+    tumorGraftOnly: MutationRecord[];
+};
+
+type MutationView = 'shared' | 'source-only' | 'tumorgraft-only';
+
 const ATTRIBUTE_ALIASES = {
     label: ['SAMPLE_LABEL', 'SAMPLE_NAME', 'LABEL'],
     clinicalType: [
@@ -234,6 +274,120 @@ function classifySampleNode(sample: CanonicalSample): NodeType {
 
     if (sample.clinicalType) return 'specimen';
     return 'unknown';
+}
+
+function isTumorSourceSample(sample: CanonicalSample) {
+    if (sample.isTumorGraft) return false;
+
+    const type = normalizeToken(sample.clinicalType);
+    const source = normalizeToken(sample.source);
+
+    if (
+        type === 'N' ||
+        type === 'NORMAL' ||
+        type === 'NORMAL TISSUE' ||
+        type === 'CL' ||
+        type === 'CELL LINE' ||
+        type === 'CELLLINE'
+    ) {
+        return false;
+    }
+
+    return (
+        type === 'T' ||
+        type === 'TUMOR' ||
+        type.includes('TUMOR') ||
+        source.includes('TUMOR') ||
+        source.includes('METASTASIS')
+    );
+}
+
+function getMutationKey(mutation: MutationRecord) {
+    const alternateAllele = mutation.variantAllele || mutation.tumorSeqAllele2;
+
+    if (
+        !mutation.chr ||
+        mutation.startPosition === undefined ||
+        !mutation.referenceAllele ||
+        !alternateAllele
+    ) {
+        return undefined;
+    }
+
+    return [
+        mutation.chr,
+        mutation.startPosition,
+        mutation.referenceAllele,
+        alternateAllele,
+    ].join(':');
+}
+
+function compareMutations(
+    mutations: MutationRecord[],
+    sourceSampleId: string,
+    tumorGraftSampleId: string
+): MutationComparison {
+    const sourceRows = mutations.filter(
+        mutation => mutation.sampleId === sourceSampleId
+    );
+    const tumorGraftRows = mutations.filter(
+        mutation => mutation.sampleId === tumorGraftSampleId
+    );
+
+    const toComparableMap = (rows: MutationRecord[]) => {
+        const map = new Map<string, MutationRecord>();
+        let excluded = 0;
+
+        rows.forEach(row => {
+            const key = getMutationKey(row);
+            if (!key) {
+                excluded += 1;
+                return;
+            }
+            if (!map.has(key)) map.set(key, row);
+        });
+
+        return { map, excluded };
+    };
+
+    const source = toComparableMap(sourceRows);
+    const tumorGraft = toComparableMap(tumorGraftRows);
+
+    const sharedKeys = Array.from(source.map.keys()).filter(key =>
+        tumorGraft.map.has(key)
+    );
+    const sourceOnlyKeys = Array.from(source.map.keys()).filter(
+        key => !tumorGraft.map.has(key)
+    );
+    const tumorGraftOnlyKeys = Array.from(tumorGraft.map.keys()).filter(
+        key => !source.map.has(key)
+    );
+
+    const unionCount = new Set([
+        ...Array.from(source.map.keys()),
+        ...Array.from(tumorGraft.map.keys()),
+    ]).size;
+
+    return {
+        sourceComparableCount: source.map.size,
+        tumorGraftComparableCount: tumorGraft.map.size,
+        sharedCount: sharedKeys.length,
+        sourceOnlyCount: sourceOnlyKeys.length,
+        tumorGraftOnlyCount: tumorGraftOnlyKeys.length,
+        unionCount,
+        retention:
+            source.map.size > 0 ? sharedKeys.length / source.map.size : 0,
+        jaccard: unionCount > 0 ? sharedKeys.length / unionCount : 0,
+        excludedSourceCount: source.excluded,
+        excludedTumorGraftCount: tumorGraft.excluded,
+        shared: sharedKeys.map(key => source.map.get(key)!),
+        sourceOnly: sourceOnlyKeys.map(key => source.map.get(key)!),
+        tumorGraftOnly: tumorGraftOnlyKeys.map(key => tumorGraft.map.get(key)!),
+    };
+}
+
+function formatPercent(value: number) {
+    return `${(value * 100).toFixed(1)}%`;
 }
 
 function createSafeExplicitParentMap(samples: CanonicalSample[]) {
@@ -585,6 +739,56 @@ async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
     return response.json();
 }
 
+async function fetchMutationProfile(
+    studyId: string,
+    signal: AbortSignal
+): Promise<MolecularProfile | undefined> {
+    const profiles = await fetchJson<MolecularProfile[]>(
+        `/api/studies/${encodeURIComponent(
+            studyId
+        )}/molecular-profiles?projection=DETAILED`,
+        signal
+    );
+
+    return profiles.find(
+        profile =>
+            normalizeToken(profile.molecularAlterationType) ===
+            'MUTATION EXTENDED'
+    );
+}
+
+async function fetchMutationsForSamples(
+    molecularProfileId: string,
+    sampleIds: string[],
+    signal: AbortSignal
+) {
+    const response = await fetch(
+        `/api/molecular-profiles/${encodeURIComponent(
+            molecularProfileId
+        )}/mutations/fetch?projection=DETAILED`,
+        {
+            method: 'POST',
+            credentials: 'same-origin',
+            signal,
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
+            body: JSON.stringify({ sampleIds }),
+        }
+    );
+
+    if (!response.ok) {
+        const error = new Error(
+            `Mutation request failed with HTTP ${response.status}`
+        ) as HttpError;
+        error.status = response.status;
+        throw error;
+    }
+
+    return response.json() as Promise<MutationRecord[]>;
+}
+
 async function fetchPatientSamples(
     studyId: string,
     patientId: string,
@@ -664,6 +868,25 @@ export default function TumorGraftLineage({ studyId, patientId }: Props) {
     const [error, setError] = React.useState('');
     const [selectedNodeId, setSelectedNodeId] = React.useState('');
     const [usedStudyFallback, setUsedStudyFallback] = React.useState(false);
+    const [selectedSourceSampleId, setSelectedSourceSampleId] = React.useState(
+        ''
+    );
+    const [
+        selectedTumorGraftSampleId,
+        setSelectedTumorGraftSampleId,
+    ] = React.useState('');
+    const [mutationComparison, setMutationComparison] = React.useState<
+        MutationComparison | undefined
+    >(undefined);
+    const [mutationProfileId, setMutationProfileId] = React.useState('');
+    const [
+        loadingMutationComparison,
+        setLoadingMutationComparison,
+    ] = React.useState(false);
+    const [mutationError, setMutationError] = React.useState('');
+    const [mutationView, setMutationView] = React.useState<MutationView>(
+        'shared'
+    );
 
     React.useEffect(() => {
         if (!studyId || !patientId) {
@@ -742,6 +965,153 @@ export default function TumorGraftLineage({ studyId, patientId }: Props) {
         load();
         return () => controller.abort();
     }, [studyId, patientId]);
+
+    const sourceSamples = React.useMemo(
+        () => samples.filter(isTumorSourceSample),
+        [samples]
+    );
+    const tumorGraftSamples = React.useMemo(
+        () => samples.filter(sample => sample.isTumorGraft),
+        [samples]
+    );
+
+    React.useEffect(() => {
+        if (sourceSamples.length === 0 || tumorGraftSamples.length === 0) {
+            setSelectedSourceSampleId('');
+            setSelectedTumorGraftSampleId('');
+            return;
+        }
+
+        const firstTumorGraft = tumorGraftSamples[0];
+        const sameGroupSource = sourceSamples.find(
+            sample => getSourceKey(sample) === getSourceKey(firstTumorGraft)
+        );
+
+        setSelectedTumorGraftSampleId(firstTumorGraft.sampleId);
+        setSelectedSourceSampleId(
+            (sameGroupSource || sourceSamples[0]).sampleId
+        );
+    }, [sourceSamples, tumorGraftSamples]);
+
+    React.useEffect(() => {
+        if (!selectedSourceSampleId || !selectedTumorGraftSampleId) {
+            setMutationComparison(undefined);
+            setMutationProfileId('');
+            setMutationError('');
+            return;
+        }
+
+        const controller = new AbortController();
+
+        async function loadMutationComparison() {
+            setLoadingMutationComparison(true);
+            setMutationError('');
+            setMutationComparison(undefined);
+
+            try {
+                const profile = await fetchMutationProfile(
+                    studyId,
+                    controller.signal
+                );
+
+                if (!profile) {
+                    setMutationProfileId('');
+                    setMutationError(
+                        'No mutation molecular profile is available for this study.'
+                    );
+                    return;
+                }
+
+                setMutationProfileId(profile.molecularProfileId);
+
+                const mutations = await fetchMutationsForSamples(
+                    profile.molecularProfileId,
+                    [selectedSourceSampleId, selectedTumorGraftSampleId],
+                    controller.signal
+                );
+
+                setMutationComparison(
+                    compareMutations(
+                        mutations,
+                        selectedSourceSampleId,
+                        selectedTumorGraftSampleId
+                    )
+                );
+            } catch (err) {
+                const typedError = err as Error;
+                if (typedError.name === 'AbortError') return;
+                setMutationError(
+                    typedError.message || 'Could not compare mutation profiles.'
+                );
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoadingMutationComparison(false);
+                }
+            }
+        }
+
+        loadMutationComparison();
+        return () => controller.abort();
+    }, [studyId, selectedSourceSampleId, selectedTumorGraftSampleId]);
+
+    const selectedSourceSample = sourceSamples.find(
+        sample => sample.sampleId === selectedSourceSampleId
+    );
+    const selectedTumorGraftSample = tumorGraftSamples.find(
+        sample => sample.sampleId === selectedTumorGraftSampleId
+    );
+
+    const comparisonRelationship =
+        selectedSourceSample && selectedTumorGraftSample
+            ? selectedTumorGraftSample.parentSampleId ===
+              selectedSourceSample.sampleId
+                ? 'explicit-lineage'
+                : getSourceKey(selectedSourceSample) ===
+                  getSourceKey(selectedTumorGraftSample)
+                ? 'metadata-associated'
+                : 'cross-provenance'
+            : undefined;
+
+    const handleNodeSelect = (node: TreeNode) => {
+        setSelectedNodeId(node.id);
+
+        const sampleId = node.metadata?.sampleId;
+        if (typeof sampleId !== 'string') return;
+
+        const sample = samples.find(
+            candidate => candidate.sampleId === sampleId
+        );
+        if (!sample) return;
+
+        if (sample.isTumorGraft) {
+            setSelectedTumorGraftSampleId(sample.sampleId);
+            const sameGroupSource = sourceSamples.find(
+                candidate => getSourceKey(candidate) === getSourceKey(sample)
+            );
+            if (sameGroupSource) {
+                setSelectedSourceSampleId(sameGroupSource.sampleId);
+            }
+            return;
+        }
+
+        if (isTumorSourceSample(sample)) {
+            setSelectedSourceSampleId(sample.sampleId);
+            const sameGroupTumorGraft = tumorGraftSamples.find(
+                candidate => getSourceKey(candidate) === getSourceKey(sample)
+            );
+            if (sameGroupTumorGraft) {
+                setSelectedTumorGraftSampleId(sameGroupTumorGraft.sampleId);
+            }
+        }
+    };
+
+    const mutationRows = mutationComparison
+        ? mutationView === 'shared'
+            ? mutationComparison.shared
+            : mutationView === 'source-only'
+            ? mutationComparison.sourceOnly
+            : mutationComparison.tumorGraftOnly
+        : [];
 
     const nodes = React.useMemo(
         () => buildProvenanceNodes(patientId, samples),
@@ -865,9 +1235,7 @@ export default function TumorGraftLineage({ studyId, patientId }: Props) {
                                     key={root.id}
                                     node={root}
                                     selectedNodeId={selectedNodeId}
-                                    onSelect={node =>
-                                        setSelectedNodeId(node.id)
-                                    }
+                                    onSelect={handleNodeSelect}
                                 />
                             ))}
                         </div>
@@ -886,6 +1254,449 @@ export default function TumorGraftLineage({ studyId, patientId }: Props) {
                                 Node Details
                             </h4>
                             <NodeDetails node={selectedNode} />
+                        </div>
+                    </div>
+
+                    <div
+                        style={{
+                            marginTop: 24,
+                            border: '1px solid #cfcfcf',
+                            borderRadius: 6,
+                            background: '#fff',
+                            overflow: 'hidden',
+                        }}
+                    >
+                        <div
+                            style={{
+                                padding: '16px 18px',
+                                borderBottom: '1px solid #ddd',
+                                background: '#f7f7f7',
+                            }}
+                        >
+                            <h4 style={{ margin: 0 }}>Molecular Fidelity</h4>
+                            <div style={{ color: '#666', marginTop: 5 }}>
+                                Compares exact genomic mutation identities
+                                between a source tumor and TumorGraft. Metrics
+                                are descriptive concordance measures and do not
+                                establish clonal ancestry.
+                            </div>
+                        </div>
+
+                        <div style={{ padding: 18 }}>
+                            {sourceSamples.length === 0 ||
+                            tumorGraftSamples.length === 0 ? (
+                                <div
+                                    className="alert alert-info"
+                                    style={{ margin: 0 }}
+                                >
+                                    This patient does not have both a
+                                    recognizable tumor specimen and TumorGraft
+                                    available for molecular comparison.
+                                </div>
+                            ) : (
+                                <div>
+                                    <div
+                                        style={{
+                                            display: 'flex',
+                                            gap: 16,
+                                            flexWrap: 'wrap',
+                                            alignItems: 'flex-end',
+                                            marginBottom: 16,
+                                        }}
+                                    >
+                                        <div>
+                                            <label>Source tumor</label>
+                                            <select
+                                                className="form-control"
+                                                value={selectedSourceSampleId}
+                                                onChange={event =>
+                                                    setSelectedSourceSampleId(
+                                                        event.target.value
+                                                    )
+                                                }
+                                                style={{ minWidth: 290 }}
+                                            >
+                                                {sourceSamples.map(sample => (
+                                                    <option
+                                                        key={sample.sampleId}
+                                                        value={sample.sampleId}
+                                                    >
+                                                        {sample.label} —{' '}
+                                                        {getSourceLabel(sample)}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label>TumorGraft</label>
+                                            <select
+                                                className="form-control"
+                                                value={
+                                                    selectedTumorGraftSampleId
+                                                }
+                                                onChange={event =>
+                                                    setSelectedTumorGraftSampleId(
+                                                        event.target.value
+                                                    )
+                                                }
+                                                style={{ minWidth: 290 }}
+                                            >
+                                                {tumorGraftSamples.map(
+                                                    sample => (
+                                                        <option
+                                                            key={
+                                                                sample.sampleId
+                                                            }
+                                                            value={
+                                                                sample.sampleId
+                                                            }
+                                                        >
+                                                            {sample.label} —{' '}
+                                                            {getSourceLabel(
+                                                                sample
+                                                            )}
+                                                        </option>
+                                                    )
+                                                )}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {comparisonRelationship ===
+                                        'metadata-associated' && (
+                                        <div className="alert alert-info">
+                                            <strong>
+                                                Metadata-associated comparison.
+                                            </strong>{' '}
+                                            These samples share source/anatomic
+                                            provenance, but the dataset does not
+                                            assert a direct parent-child
+                                            relationship.
+                                        </div>
+                                    )}
+
+                                    {comparisonRelationship ===
+                                        'explicit-lineage' && (
+                                        <div className="alert alert-success">
+                                            <strong>
+                                                Explicit lineage comparison.
+                                            </strong>{' '}
+                                            The TumorGraft identifies the
+                                            selected tumor as its parent sample.
+                                        </div>
+                                    )}
+
+                                    {comparisonRelationship ===
+                                        'cross-provenance' && (
+                                        <div className="alert alert-warning">
+                                            <strong>
+                                                Cross-provenance comparison.
+                                            </strong>{' '}
+                                            The selected samples belong to
+                                            different source/site groups.
+                                            Interpret molecular similarity
+                                            independently of provenance.
+                                        </div>
+                                    )}
+
+                                    {loadingMutationComparison && (
+                                        <div>Loading mutation fidelity...</div>
+                                    )}
+
+                                    {mutationError && (
+                                        <div className="alert alert-danger">
+                                            {mutationError}
+                                        </div>
+                                    )}
+
+                                    {!loadingMutationComparison &&
+                                        mutationComparison && (
+                                            <div>
+                                                <div
+                                                    style={{
+                                                        color: '#777',
+                                                        fontSize: 12,
+                                                        marginBottom: 12,
+                                                    }}
+                                                >
+                                                    Mutation profile:{' '}
+                                                    <code>
+                                                        {mutationProfileId}
+                                                    </code>{' '}
+                                                    · Matching key: chromosome +
+                                                    start position + reference
+                                                    allele + alternate allele
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        display: 'grid',
+                                                        gridTemplateColumns:
+                                                            'repeat(auto-fit, minmax(150px, 1fr))',
+                                                        gap: 10,
+                                                        marginBottom: 18,
+                                                    }}
+                                                >
+                                                    {[
+                                                        [
+                                                            'Source variants',
+                                                            mutationComparison.sourceComparableCount,
+                                                        ],
+                                                        [
+                                                            'TumorGraft variants',
+                                                            mutationComparison.tumorGraftComparableCount,
+                                                        ],
+                                                        [
+                                                            'Shared variants',
+                                                            mutationComparison.sharedCount,
+                                                        ],
+                                                        [
+                                                            'Source-only',
+                                                            mutationComparison.sourceOnlyCount,
+                                                        ],
+                                                        [
+                                                            'TumorGraft-only',
+                                                            mutationComparison.tumorGraftOnlyCount,
+                                                        ],
+                                                        [
+                                                            'Mutation retention',
+                                                            formatPercent(
+                                                                mutationComparison.retention
+                                                            ),
+                                                        ],
+                                                        [
+                                                            'Jaccard similarity',
+                                                            formatPercent(
+                                                                mutationComparison.jaccard
+                                                            ),
+                                                        ],
+                                                    ].map(([label, value]) => (
+                                                        <div
+                                                            key={String(label)}
+                                                            style={{
+                                                                border:
+                                                                    '1px solid #ddd',
+                                                                borderRadius: 6,
+                                                                padding: 12,
+                                                                background:
+                                                                    '#fafafa',
+                                                            }}
+                                                        >
+                                                            <div
+                                                                style={{
+                                                                    color:
+                                                                        '#666',
+                                                                    fontSize: 12,
+                                                                }}
+                                                            >
+                                                                {label}
+                                                            </div>
+                                                            <strong
+                                                                style={{
+                                                                    fontSize: 20,
+                                                                }}
+                                                            >
+                                                                {value}
+                                                            </strong>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                {(mutationComparison.excludedSourceCount >
+                                                    0 ||
+                                                    mutationComparison.excludedTumorGraftCount >
+                                                        0) && (
+                                                    <div className="alert alert-warning">
+                                                        Some mutation records
+                                                        lacked complete genomic
+                                                        identity and were
+                                                        excluded from
+                                                        concordance metrics:
+                                                        source{' '}
+                                                        {
+                                                            mutationComparison.excludedSourceCount
+                                                        }
+                                                        , TumorGraft{' '}
+                                                        {
+                                                            mutationComparison.excludedTumorGraftCount
+                                                        }
+                                                        .
+                                                    </div>
+                                                )}
+
+                                                <div
+                                                    style={{
+                                                        display: 'flex',
+                                                        gap: 8,
+                                                        marginBottom: 12,
+                                                        flexWrap: 'wrap',
+                                                    }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        className={`btn btn-sm ${
+                                                            mutationView ===
+                                                            'shared'
+                                                                ? 'btn-primary'
+                                                                : 'btn-default'
+                                                        }`}
+                                                        onClick={() =>
+                                                            setMutationView(
+                                                                'shared'
+                                                            )
+                                                        }
+                                                    >
+                                                        Shared (
+                                                        {
+                                                            mutationComparison.sharedCount
+                                                        }
+                                                        )
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className={`btn btn-sm ${
+                                                            mutationView ===
+                                                            'source-only'
+                                                                ? 'btn-primary'
+                                                                : 'btn-default'
+                                                        }`}
+                                                        onClick={() =>
+                                                            setMutationView(
+                                                                'source-only'
+                                                            )
+                                                        }
+                                                    >
+                                                        Source-only (
+                                                        {
+                                                            mutationComparison.sourceOnlyCount
+                                                        }
+                                                        )
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className={`btn btn-sm ${
+                                                            mutationView ===
+                                                            'tumorgraft-only'
+                                                                ? 'btn-primary'
+                                                                : 'btn-default'
+                                                        }`}
+                                                        onClick={() =>
+                                                            setMutationView(
+                                                                'tumorgraft-only'
+                                                            )
+                                                        }
+                                                    >
+                                                        TumorGraft-only (
+                                                        {
+                                                            mutationComparison.tumorGraftOnlyCount
+                                                        }
+                                                        )
+                                                    </button>
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        border:
+                                                            '1px solid #ddd',
+                                                        borderRadius: 6,
+                                                        overflowX: 'auto',
+                                                    }}
+                                                >
+                                                    <table
+                                                        className="table table-striped table-condensed"
+                                                        style={{
+                                                            marginBottom: 0,
+                                                        }}
+                                                    >
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Gene</th>
+                                                                <th>
+                                                                    Protein
+                                                                    change
+                                                                </th>
+                                                                <th>
+                                                                    Genomic
+                                                                    variant
+                                                                </th>
+                                                                <th>Type</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {mutationRows.map(
+                                                                (
+                                                                    mutation,
+                                                                    index
+                                                                ) => {
+                                                                    const alternateAllele =
+                                                                        mutation.variantAllele ||
+                                                                        mutation.tumorSeqAllele2 ||
+                                                                        '?';
+
+                                                                    return (
+                                                                        <tr
+                                                                            key={`${getMutationKey(
+                                                                                mutation
+                                                                            )}-${index}`}
+                                                                        >
+                                                                            <td>
+                                                                                <strong>
+                                                                                    {mutation
+                                                                                        .gene
+                                                                                        ?.hugoGeneSymbol ||
+                                                                                        'Unknown'}
+                                                                                </strong>
+                                                                            </td>
+                                                                            <td>
+                                                                                {mutation.proteinChange ||
+                                                                                    '—'}
+                                                                            </td>
+                                                                            <td>
+                                                                                chr
+                                                                                {mutation.chr ||
+                                                                                    '?'}
+
+                                                                                :
+                                                                                {mutation.startPosition ??
+                                                                                    '?'}{' '}
+                                                                                {mutation.referenceAllele ||
+                                                                                    '?'}
+
+                                                                                →
+                                                                                {
+                                                                                    alternateAllele
+                                                                                }
+                                                                            </td>
+                                                                            <td>
+                                                                                {mutation.variantType ||
+                                                                                    mutation.mutationType ||
+                                                                                    '—'}
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                }
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+
+                                                    {mutationRows.length ===
+                                                        0 && (
+                                                        <div
+                                                            style={{
+                                                                padding: 16,
+                                                                color: '#777',
+                                                            }}
+                                                        >
+                                                            No variants in this
+                                                            category.
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
